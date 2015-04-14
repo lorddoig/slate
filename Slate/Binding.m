@@ -18,6 +18,10 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see http://www.gnu.org/licenses
 
+#include <CoreFoundation/CoreFoundation.h>
+#include <Carbon/Carbon.h> /* For kVK_ constants, and TIS functions. */
+
+#import <Foundation/Foundation.h>
 #import "Binding.h"
 #import "Constants.h"
 #import "SlateConfig.h"
@@ -118,6 +122,11 @@ static NSDictionary *dictionary = nil;
   if ([keyAndModifiers count] >= 1) {
     NSString *theKey = [keyAndModifiers objectAtIndex:0];
     theKeyCode = [[Binding asciiToCodeDict] objectForKey:theKey];
+      
+    if (theKeyCode == nil && [theKey length] == 1) {
+        theKeyCode = [Binding keyCodeForChar:[theKey characterAtIndex:0]];
+    }
+      
     if (theKeyCode == nil) {
       SlateLogger(@"ERROR: Unrecognized key \"%@\" in \"%@\"", theKey, keystroke);
       @throw([NSException exceptionWithName:@"Unrecognized Key" reason:[NSString stringWithFormat:@"Unrecognized key \"%@\" in \"%@\"", theKey, keystroke] userInfo:nil]);
@@ -228,21 +237,68 @@ static NSDictionary *dictionary = nil;
 
 // This returns a dictionary containing mappings from ASCII to keyCode
 + (NSDictionary *)asciiToCodeDict {
-  if (dictionary == nil) {
-    NSString *configLayout = [[SlateConfig getInstance] getConfig:KEYBOARD_LAYOUT];
-    NSString *filename;
-    if ([configLayout isEqualToString:KEYBOARD_LAYOUT_DVORAK]) {
-      filename = @"ASCIIToCode_Dvorak";
-    } else if ([configLayout isEqualToString:KEYBOARD_LAYOUT_COLEMAK]) {
-      filename = @"ASCIIToCode_Colemak";
-    } else if ([configLayout isEqualToString:KEYBOARD_LAYOUT_AZERTY]) {
-      filename = @"ASCIIToCode_Azerty";
-    } else {
-      filename = @"ASCIIToCode";
-    }
-    dictionary = [NSDictionary dictionaryWithContentsOfFile:[[NSBundle mainBundle] pathForResource:filename ofType:@"plist"]];
+    if (dictionary == nil) {
+    dictionary = [NSDictionary dictionaryWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"ASCIIToCode" ofType:@"plist"]];
   }
   return dictionary;
 }
 
++ (NSNumber *)keyCodeForChar:(const char)c {
+    static CFMutableDictionaryRef charToCodeDict = NULL;
+    CGKeyCode code;
+    UniChar character = c;
+    CFStringRef charStr = NULL;
+    
+    if (charToCodeDict == NULL) {
+        size_t i;
+
+        charToCodeDict = CFDictionaryCreateMutable(kCFAllocatorDefault, 128, &kCFCopyStringDictionaryKeyCallBacks, NULL);
+        if (charToCodeDict == NULL) return nil;
+        
+        for (i = 0; i < 128; ++i) {
+            CFStringRef string = createStringForKey((CGKeyCode)i);
+            if (string != NULL) {
+                CFDictionaryAddValue(charToCodeDict, string, (const void *)i);
+                CFRelease(string);
+            }
+        }
+    }
+    
+    charStr = CFStringCreateWithCharacters(kCFAllocatorDefault, &character, 1);
+    
+    if (!CFDictionaryGetValueIfPresent(charToCodeDict, charStr, (const void **)&code)) {
+        return nil;
+    }
+    CFRelease(charStr);
+    
+    return [NSNumber numberWithUnsignedShort:code];
+}
+
 @end
+
+CFStringRef createStringForKey(CGKeyCode keyCode) {
+    TISInputSourceRef currentKeyboard = TISCopyCurrentKeyboardInputSource();
+    CFDataRef layoutData =
+    TISGetInputSourceProperty(currentKeyboard,
+                              kTISPropertyUnicodeKeyLayoutData);
+    const UCKeyboardLayout *keyboardLayout =
+    (const UCKeyboardLayout *)CFDataGetBytePtr(layoutData);
+    
+    UInt32 keysDown = 0;
+    UniChar chars[4];
+    UniCharCount realLength;
+    
+    UCKeyTranslate(keyboardLayout,
+                   keyCode,
+                   kUCKeyActionDisplay,
+                   0,
+                   LMGetKbdType(),
+                   kUCKeyTranslateNoDeadKeysBit,
+                   &keysDown,
+                   sizeof(chars) / sizeof(chars[0]),
+                   &realLength,
+                   chars);
+    CFRelease(currentKeyboard);
+    
+    return CFStringCreateWithCharacters(kCFAllocatorDefault, chars, 1);
+}

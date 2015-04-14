@@ -49,5 +49,8 @@
 - (NSString *)modalHashKey;
 + (NSArray *)modalHashKeyToKeyAndModifiers:(NSString *)modalHashKey;
 + (NSArray *)getKeystrokeFromString:(NSString *)keystroke;
++ (NSNumber *)keyCodeForChar:(char)c;
 
 @end
+
+CFStringRef createStringForKey(CGKeyCode keyCode);
